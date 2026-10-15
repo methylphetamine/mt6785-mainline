@@ -83,6 +83,36 @@ jobs:
         if: always()
         run: ccache -s
 
+      # gen_btf() runs pahole without checking its exit status and the objcopy
+      # after it has 2>/dev/null, so a pahole failure is silent and only shows
+      # up later as "load BTF from vmlinux: Invalid argument". Re-run pahole by
+      # hand on the surviving intermediate to get the real error.
+      - name: Diagnose BTF failure
+        if: failure()
+        run: |
+          set +e
+          K=gki-src/out-gki/kernel
+          echo "=== surviving intermediates ==="
+          ls -la "$K"/.tmp_vmlinux* "$K"/vmlinux* 2>/dev/null
+          for f in "$K/.tmp_vmlinux1" "$K/.tmp_vmlinux1.btf.o"; do
+            echo "=== .BTF section in $(basename "$f") ==="
+            readelf -SW "$f" 2>/dev/null | grep -i btf || echo "  (no .BTF section)"
+          done
+          echo "=== re-run pahole manually on a copy ==="
+          cp -f "$K/.tmp_vmlinux1" "$K/manual.elf" 2>/dev/null
+          if [ -f "$K/manual.elf" ]; then
+            echo "--- pahole version ---"; pahole --version
+            echo "--- running: pahole -J \$PAHOLE_FLAGS ---"
+            pahole -J --btf_gen_floats -j1 \
+              --skip_encoding_btf_inconsistent_proto --btf_gen_optimized \
+              "$K/manual.elf"
+            echo "PAHOLE EXIT CODE: $?"
+            echo "--- .BTF after manual run ---"
+            readelf -SW "$K/manual.elf" 2>/dev/null | grep -i btf || echo "  (still no .BTF - pahole emitted nothing)"
+          fi
+          echo "=== CONFIG_DEBUG_INFO* / PAHOLE ==="
+          grep -E '^CONFIG_(DEBUG_INFO|PAHOLE)' gki-src/out-gki/kernel/.config 2>/dev/null
+
       - name: Verify artifacts
         run: |
           set -euo pipefail
