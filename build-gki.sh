@@ -53,6 +53,13 @@ if [ "$USE_CCACHE" != "0" ] && command -v ccache >/dev/null 2>&1; then
   CACHE_PREFIX="ccache "
 fi
 
+# make resolves a relative O= against the -C directory, not the caller's CWD.
+# With a relative TREE (as CI uses: TREE=gki-src) a relative OUTDIR would
+# therefore land the config and objects inside the tree, and every later path
+# derived from $kdir would silently miss. Absolutise both up front.
+TREE="$(cd "$TREE" && pwd)"
+mkdir -p "$OUTDIR"
+OUTDIR="$(cd "$OUTDIR" && pwd)"
 kdir="$OUTDIR/kernel"
 mkdir -p "$kdir"
 
