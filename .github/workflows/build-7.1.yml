@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 300
     env:
-      PANEL: auto
+      PANEL: all
 
     steps:
       - uses: actions/checkout@v4
