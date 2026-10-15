@@ -90,6 +90,26 @@ info "jobs    : $JOBS"
 info "configuring gki_defconfig"
 make -C "$TREE" "${make_args[@]}" gki_defconfig
 
+# gki_defconfig selects CONFIG_DEBUG_INFO_DWARF5=y. pahole 1.25 (the version
+# CONFIG_PAHOLE_VERSION=125 asks for) has incomplete DWARF5 support: gen_btf()
+# in scripts/link-vmlinux.sh does not check pahole's exit status, so pahole
+# silently fails and leaves an empty .BTF section. The final vmlinux then fails
+# with "FAILED: load BTF from vmlinux: Invalid argument" (libbpf's btf_parse_hdr
+# returns -EINVAL when the section is smaller than the 24-byte header).
+# DWARF4 is the known-good pairing for pahole 1.x.
+if grep -q '^CONFIG_DEBUG_INFO_DWARF5=y' "$kdir/.config" 2>/dev/null; then
+  info "forcing DWARF4 for pahole compatibility"
+  "$TREE/scripts/config" --file "$kdir/.config" \
+    --disable DEBUG_INFO_DWARF5 \
+    --enable  DEBUG_INFO_DWARF4
+  make -C "$TREE" "${make_args[@]}" olddefconfig
+  grep -q '^CONFIG_DEBUG_INFO_DWARF4=y' "$kdir/.config" ||
+    die "could not select DEBUG_INFO_DWARF4 (check clang/DWARF4 Kconfig deps)"
+  grep -E '^CONFIG_DEBUG_INFO_(DWARF4|DWARF5|BTF)=y' "$kdir/.config" | sed 's/^/      /'
+fi
+
+info "pahole: $(pahole --version 2>/dev/null | head -1)"
+
 info "building with -j$JOBS"
 make -C "$TREE" "${make_args[@]}" -j"$JOBS" $TARGETS
 
@@ -101,6 +121,20 @@ done
 [ -f "$kdir/System.map" ] && cp -f "$kdir/System.map" "$OUTDIR/" 2>/dev/null || true
 [ -f "$kdir/.config" ] && cp -f "$kdir/.config" "$OUTDIR/gki.config"
 [ -d "$kdir/lib/modules" ] && cp -f -r "$kdir/lib/modules" "$OUTDIR/" 2>/dev/null || true
+
+# Self-diagnosis: gen_btf() never checks pahole's exit status, so a pahole
+# failure yields an empty .BTF and only surfaces much later as
+# "FAILED: load BTF from vmlinux: Invalid argument". Check it here instead.
+if grep -q '^CONFIG_DEBUG_INFO_BTF=y' "$kdir/.config" 2>/dev/null && [ -f "$kdir/vmlinux" ]; then
+  bsz=$(readelf -S "$kdir/vmlinux" 2>/dev/null | awk '$2==".BTF" {print strtonum("0x"$6)}' | head -1)
+  if [ -n "$bsz" ] && [ "$bsz" -ge 24 ]; then
+    ok ".BTF section: $bsz bytes"
+  else
+    die "vmlinux .BTF is empty/absent (${bsz:-0} bytes) - pahole did not emit BTF.
+  gen_btf() in scripts/link-vmlinux.sh ignores pahole's exit status.
+  Check: pahole version vs CONFIG_PAHOLE_VERSION, and DEBUG_INFO_DWARF4 vs DWARF5."
+  fi
+fi
 
 command -v ccache >/dev/null 2>&1 && ccache -s 2>/dev/null | grep -E "Hits|Misses" | sed 's/^/      /' || true
 
