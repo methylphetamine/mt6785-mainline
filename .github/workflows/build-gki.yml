@@ -44,7 +44,29 @@ jobs:
           sudo apt-get install -y -qq \
             bc bison flex libssl-dev libelf-dev libdw-dev libdwarf-dev \
             dwarves zstd cpio python3 rsync ccache clang lld \
-            build-essential
+            build-essential cmake pkg-config
+
+      # Ubuntu ships pahole 1.25, but this tree's scripts/Makefile.btf only
+      # uses the modern --btf_features path at pahole >= 1.26. With 1.25 the
+      # GKI link ends in "FAILED: load BTF from vmlinux: Invalid argument"
+      # because gen_btf() never checks pahole's exit status. Build 1.29.
+      # CONFIG_PAHOLE_VERSION is auto-derived from the binary at configure
+      # time (init/Kconfig -> scripts/pahole-version.sh), so just having the
+      # newer binary ahead of the distro one is enough.
+      - name: Build pahole 1.29
+        run: |
+          set -euo pipefail
+          PAHOLE_VER="${PAHOLE_VER:-v1.29}"
+          echo "building pahole $PAHOLE_VER"
+          git clone -q --depth 1 --branch "$PAHOLE_VER" \
+            https://git.kernel.org/pub/scm/devel/pahole/pahole.git pahole-src
+          cmake -S pahole-src -B pahole-src/build -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr/local
+          cmake --build pahole-src/build -j "$(nproc)"
+          sudo cmake --install pahole-src/build
+          sudo ldconfig
+          hash -r
+          echo "installed: $(command -v pahole) -> $(pahole --version)"
 
       - name: Clone kernel_common
         run: |
@@ -57,6 +79,16 @@ jobs:
           git -C gki-src checkout -q FETCH_HEAD
           echo "kernel_common $GKI_BRANCH @ $(git -C gki-src rev-parse --short HEAD)"
           grep -m3 -E '^(VERSION|PATCHLEVEL|SUBLEVEL) =' gki-src/Makefile
+
+      - name: Assert pahole is new enough
+        run: |
+          set -euo pipefail
+          got="$(gki-src/scripts/pahole-version.sh "$(command -v pahole)")"
+          echo "PAHOLE_VERSION=$got"
+          if [ "$got" -lt 126 ]; then
+            echo "::error::pahole $got is too old; need >= 126 for --btf_features"
+            exit 1
+          fi
 
       - name: Configure ccache
         run: |
