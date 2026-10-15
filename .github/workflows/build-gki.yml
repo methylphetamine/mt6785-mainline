@@ -1,0 +1,110 @@
+name: build-gki
+
+on:
+  push:
+    branches: [ 'gki' ]
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
+    inputs:
+      gki_branch:
+        description: kernel_common branch to build
+        type: string
+        default: 'android16-6.12'
+
+concurrency:
+  group: build-gki
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: GKI
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    env:
+      GKI_BRANCH: ${{ inputs.gki_branch || 'android16-6.12' }}
+
+    steps:
+      - name: Resolve GKI branch
+        run: |
+          set -euo pipefail
+          case "$GKI_BRANCH" in
+            android16-*) ;;
+            *) echo "::error::GKI branch must start with android16-, got '$GKI_BRANCH'"; exit 1 ;;
+          esac
+          echo "building kernel_common branch $GKI_BRANCH"
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq \
+            bc bison flex libssl-dev libelf-dev libdw-dev libdwarf-dev \
+            dwarves zstd cpio python3 rsync ccache clang lld \
+            build-essential
+
+      - name: Clone kernel_common
+        run: |
+          set -euo pipefail
+          mkdir -p gki-src
+          git init -q gki-src
+          git -C gki-src remote add origin \
+            https://github.com/aosp-mirror/kernel_common.git
+          git -C gki-src fetch -q --depth 1 origin "$GKI_BRANCH"
+          git -C gki-src checkout -q FETCH_HEAD
+          echo "kernel_common $GKI_BRANCH @ $(git -C gki-src rev-parse --short HEAD)"
+          grep -m3 -E '^(VERSION|PATCHLEVEL|SUBLEVEL) =' gki-src/Makefile
+
+      - name: Configure ccache
+        run: |
+          ccache --set-config=cache_dir="$HOME/.cache/ccache"
+          ccache --set-config=max_size=5G
+          ccache --set-config=compression=true
+          ccache --set-config=compiler_check=content
+          ccache -z
+          echo "USE_CCACHE=1" >> "$GITHUB_ENV"
+
+      - name: Restore ccache
+        uses: actions/cache@v4
+        continue-on-error: true
+        with:
+          path: ~/.cache/ccache
+          key: ccache-gki-${{ env.GKI_BRANCH }}-${{ github.sha }}
+          restore-keys: |
+            ccache-gki-${{ env.GKI_BRANCH }}-
+
+      - name: Build GKI kernel
+        run: ./build-gki.sh -j "$(nproc)" --targets Image --out out-gki
+
+      - name: Report ccache hit rate
+        if: always()
+        run: ccache -s
+
+      - name: Verify artifacts
+        run: |
+          set -euo pipefail
+          test -s out-gki/Image
+          ls -l out-gki
+          echo "version: $(grep -m1 CONFIG_LOCALVERSION out-gki/gki.config || true)"
+          echo "btf:     $(grep -c '^CONFIG_DEBUG_INFO_BTF=y' out-gki/gki.config)"
+          echo "modules: $(grep -c '^CONFIG_MODULES=y' out-gki/gki.config)"
+
+      - name: Save ccache
+        uses: actions/cache/save@v4
+        if: always()
+        continue-on-error: true
+        with:
+          path: ~/.cache/ccache
+          key: ccache-gki-${{ env.GKI_BRANCH }}-${{ github.sha }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: gki-${{ env.GKI_BRANCH }}
+          path: |
+            out-gki/Image
+            out-gki/gki.config
+          if-no-files-found: error
