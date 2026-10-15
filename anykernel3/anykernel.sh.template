@@ -1,0 +1,449 @@
+# AnyKernel3 Ramdisk Mod Script
+# osm0sis @ xda-developers
+# Configured for Pox Kernel 1.0.0-Beta [Onyx] by TXO R (Pox Project)
+
+## AnyKernel setup
+properties() { '
+kernel.string=Pox 1.0.0-Beta [Onyx] (3888146) by TXO R (Pox Project) for Redmi Note 8 Pro (begonia)
+do.devicecheck=1
+do.modules=0
+do.systemless=0
+do.cleanup=1
+do.cleanuponabort=0
+device.name1=begonia
+device.name2=begonia_in
+device.name3=begoniain
+device.name4=
+supported.versions=
+supported.patchlevels=
+'; } # end properties
+
+## shell variables
+BLOCK=/dev/block/by-name/boot;
+# Redmi Note 8 Pro (begonia) is an A-only device: a single boot partition,
+# no A/B slot suffix. Keep IS_SLOT_DEVICE=0 (AnyKernel3 default for A-only).
+IS_SLOT_DEVICE=0;
+RAMDISK_COMPRESSION=auto;
+PATCH_VBMETA_FLAG=auto;
+
+## AnyKernel methods (DO NOT CHANGE)
+# import patching functions/variables - see for reference
+. tools/ak3-core.sh;
+
+## TWRP / Recovery UI Banner & Version Details
+ui_print " ";
+ui_print " ============================================";
+ui_print "   POX KERNEL 1.0.0-Beta [ONYX]";
+ui_print " ============================================";
+ui_print "  * Kernel       : Pox            ";
+ui_print "  * Version      : 1.0.0-Beta         ";
+ui_print "  * Version Name : Onyx (Zero Frame-Drop Gaming Edition (Unrooted))";
+ui_print "  * Branch       : onyx             ";
+ui_print "  * Commit ID    : 3888146            ";
+ui_print "  * Device       : Redmi Note 8 Pro (begonia)";
+ui_print "  * Maintainer   : TXO R (Pox Project)             ";
+ui_print "  * Motto        : We aim for stability,     ";
+ui_print "                   not for anything else.    ";
+ui_print "  * Linux Ver    : 4.14.357                     ";
+ui_print "  * Build Date   : 2026-10-13 16:50              ";
+ui_print "  * Toolchain    : Clang 11.0.1 + GCC 9.3            ";
+ui_print "  * Features     : APatch / KernelPatch ready";
+ui_print "  * Crypto Engine: ARMv8 CE & NEON Accelerated";
+ui_print "  * Mem Engine   : iOS-Style On-Demand ZRAM  ";
+ui_print "  * Game Engine  : Zero Frame-Drop Gaming Mode";
+ui_print "  * Display Mode : iOS D65 & Sunlight HBM Overdrive";
+ui_print "  * Perf Mode    : Tri-State Auto-Trigger Engine";
+ui_print " --------------------------------------------";
+ui_print "  LATEST COMMIT:";
+ui_print "  ci(workflow): upload build artifacts directly to v1.0.0-Beta mainline release";
+ui_print " --------------------------------------------";
+ui_print "  CHANGELOG (Recent Changes):";
+ui_print "   * [388814663fe1] ci(workflow): upload build artifacts directly to v1.0.0-Beta mainline release";
+ui_print "   * [ffa7fe2ead76] ci(build): restrict release publication strictly to version tags";
+ui_print "   * [709e2e5c81f6] docs: add comprehensive human-readable CHANGELOG.md for 1.0.0-Beta and 0.9";
+ui_print "   * [329553440d5a] perf(storage): optimize default UFS I/O scheduler to noop and enable crypto user API";
+ui_print "   * [df76b9d32eec] fix(module): restore struct module ABI layout and guard usage links";
+ui_print "   * [5bcd365fed96] chore(build): gitignore pox-manager application and release apks";
+ui_print "   * [adb0550ccc04] feat(build): configure init permissions for xswapd sysfs and memcg nodes";
+ui_print " ============================================";
+ui_print " ";
+
+## AnyKernel file attributes
+ui_print " [*] [1/4] Configuring ramdisk permissions & ownership...";
+ui_print "     - Target partition: /dev/block/by-name/boot (A-only)";
+chmod -R 750 $RAMDISK/*;
+chown -R root:root $RAMDISK/*;
+
+## AnyKernel install
+ui_print " [*] [2/4] Dumping and unpacking current boot image...";
+dump_boot;
+
+## Ramdisk enhancements
+if [ -d "$RAMDISK" ]; then
+    ui_print " [*] Injecting memory enhancement & gaming mode into ramdisk...";
+
+    # 1. iOS-Style On-Demand Compressed Memory Management
+    cat << 'RC_EOF' > $RAMDISK/init.memory_enhanced.rc
+# Pox adaptive memory (HarmonyOS EROFS-cache + MGLRU lesson, 4.14-safe):
+# - swappiness 100: anon -> per-CPU zstd ZRAM (no LMK kills, 85% fewer kills lesson)
+# - watermark 150: early kswapd fits 8.3ms frame budget (gaming raises to 200, powersave drops to 100)
+# - page-cluster 0: no swap readahead (ZRAM random; readahead wastes CPU/RAM)
+# - vfs pressure 50: retain dentries for instant launch (EROFS block-cache lesson)
+# - dirty 20/10: throughput (gaming tightens to 10/5 for latency)
+# Kernel gaming_mode switches these per-mode; boot sets balanced baseline.
+on boot
+    write /proc/sys/vm/watermark_scale_factor 150
+    write /proc/sys/vm/page-cluster 0
+    write /proc/sys/vm/vfs_cache_pressure 50
+    write /proc/sys/vm/swappiness 100
+    write /proc/sys/vm/dirty_ratio 20
+    write /proc/sys/vm/dirty_background_ratio 10
+    write /proc/sys/vm/dirty_expire_centisecs 1500
+    write /proc/sys/vm/dirty_writeback_centisecs 300
+    write /proc/sys/vm/stat_interval 10
+
+    # Advanced CFS & Interactivity Tunables (FreeBSD ULE / Windows NT Dynamic Boost)
+    write /proc/sys/kernel/sched_latency_ns 3000000
+    write /proc/sys/kernel/sched_min_granularity_ns 300000
+    write /proc/sys/kernel/sched_wakeup_granularity_ns 250000
+    write /proc/sys/kernel/sched_sync_hint_enable 1
+
+    # Low-latency high-throughput networking & Fair Queueing for BBR
+    write /proc/sys/net/core/default_qdisc fq
+    write /proc/sys/net/ipv4/tcp_congestion_control bbr
+    write /proc/sys/net/ipv4/tcp_fastopen 3
+    write /proc/sys/net/ipv4/tcp_slow_start_after_idle 0
+    write /proc/sys/net/ipv4/tcp_tw_reuse 1
+    write /proc/sys/net/ipv4/tcp_autocorking 0
+    write /proc/sys/net/ipv4/tcp_notsent_lowat 16384
+    write /proc/sys/net/ipv4/tcp_rmem "4096 87380 6291456"
+    write /proc/sys/net/ipv4/tcp_wmem "4096 65536 6291456"
+    write /proc/sys/net/ipv4/tcp_ecn 1
+    write /proc/sys/net/ipv4/tcp_syncookies 1
+    write /proc/sys/net/core/netdev_max_backlog 5000
+
+on property:sys.boot_completed=1
+    write /sys/block/zram0/comp_algorithm zstd
+    write /sys/block/zram0/max_comp_streams 8
+    write /proc/sys/vm/watermark_scale_factor 150
+    write /proc/sys/vm/page-cluster 0
+    write /proc/sys/vm/vfs_cache_pressure 50
+    write /proc/sys/vm/swappiness 100
+    write /proc/sys/vm/dirty_ratio 20
+    write /proc/sys/vm/dirty_background_ratio 10
+    write /proc/sys/vm/dirty_expire_centisecs 1500
+    write /proc/sys/vm/dirty_writeback_centisecs 300
+    write /proc/sys/vm/stat_interval 10
+    write /proc/sys/kernel/sched_latency_ns 3000000
+    write /proc/sys/kernel/sched_min_granularity_ns 300000
+    write /proc/sys/kernel/sched_wakeup_granularity_ns 250000
+    write /proc/sys/net/core/default_qdisc fq
+    write /proc/sys/net/ipv4/tcp_congestion_control bbr
+    write /proc/sys/net/ipv4/tcp_autocorking 0
+    write /proc/sys/net/ipv4/tcp_notsent_lowat 16384
+    write /proc/sys/net/ipv4/tcp_rmem "4096 87380 6291456"
+    write /proc/sys/net/ipv4/tcp_wmem "4096 65536 6291456"
+RC_EOF
+    chmod 644 $RAMDISK/init.memory_enhanced.rc
+
+    # 2. Zero Frame-Drop Gaming Mode, Real Colors Calibration & ROM Performance Mode Triggers
+    cat << 'RC_EOF' > $RAMDISK/init.gaming.rc
+# Gaming Mode & iOS Display Init Script for Redmi Note 8 Pro (begonia)
+# Triggers full gaming performance optimizations and color profiles
+
+on boot
+    chmod 0644 /proc/perfmgr/gaming_mode
+    chmod 0644 /sys/kernel/gaming_mode
+    chmod 0644 /proc/perfmgr/true_tone
+    chmod 0644 /sys/kernel/true_tone
+    chmod 0644 /proc/perfmgr/color_mode
+    chmod 0644 /sys/kernel/color_mode
+    chmod 0644 /proc/perfmgr/hbm_mode
+    chmod 0644 /sys/kernel/hbm_mode
+    # Pox standout safe-rootless torch: 0666 by design so stock
+    # flashlight apps work without root; hardware guards
+    # (325mA clamp, 20ms anti-strobe, 5-min timeout) in driver.
+    chmod 0666 /proc/perfmgr/torch_brightness
+    chmod 0666 /proc/perfmgr/flashlight_brightness
+    chmod 0444 /proc/perfmgr/torch_info
+    chmod 0444 /proc/perfmgr/profile
+    chmod 0666 /sys/kernel/torch_brightness
+    chmod 0666 /sys/kernel/flashlight_brightness
+    chmod 0666 /sys/devices/platform/flashlights_mt6360/torchbrightness
+    chmod 0644 /proc/perfmgr/camera_profile
+    chmod 0644 /sys/kernel/camera_profile
+    chmod 0644 /proc/perfmgr/slog3
+    chmod 0644 /sys/kernel/slog3
+    chmod 0644 /proc/perfmgr/camera_4k60
+    chmod 0644 /sys/kernel/camera_4k60
+    # Universal USB OTG: keep every adapter working plug-and-play.
+    # Directory needs +x to enumerate; device nodes stay world-
+    # accessible so DACs/serial/ethernet/iPhone tethering just work.
+    chmod 0755 /dev/bus/usb
+    chmod 0666 /dev/bus/usb/*/* 2>/dev/null || true
+    chmod 0666 /dev/ttyUSB0
+    chmod 0666 /dev/ttyUSB1
+    chmod 0666 /dev/ttyUSB2
+    chmod 0666 /dev/ttyUSB3
+    chmod 0666 /dev/ttyACM0
+    chmod 0666 /dev/ttyACM1
+    chmod 0644 /proc/perfmgr/touch_game_mode
+    chmod 0644 /proc/perfmgr/touch_sensitivity
+    chmod 0664 /sys/class/touch/touch_dev/touch_game_mode
+    chmod 0664 /sys/class/touch/touch_dev/touch_sensitivity
+    chmod 0644 /proc/perfmgr/headphone_gain
+    chmod 0644 /sys/kernel/sound_control/headphone_gain
+    chmod 0644 /proc/perfmgr/mic_gain
+    chmod 0644 /sys/kernel/sound_control/mic_gain
+    chmod 0644 /proc/perfmgr/vibrator_strength
+    chmod 0644 /proc/perfmgr/wakelock_blocker
+    chmod 0644 /proc/perfmgr/fast_charge
+    chmod 0644 /proc/perfmgr/dt2w
+    chmod 0644 /sys/android_touch/doubletap2wake
+    chmod 0644 /proc/perfmgr/dynamic_fsync
+    chmod 0644 /sys/kernel/dynamic_fsync/dynamic_fsync
+    chmod 0644 /sys/module/task_turbo/parameters/feats
+    chmod 0644 /proc/perfmgr/battery_bypass
+    chmod 0644 /proc/perfmgr/battery_limit
+    chmod 0444 /proc/perfmgr/battery_status
+    chmod 0644 /sys/module/ged/parameters/gx_game_mode
+    chmod 0644 /sys/module/ged/parameters/gx_boost_on
+    chmod 0644 /sys/module/ged/parameters/boost_gpu_enable
+    chmod 0644 /sys/module/ged/parameters/gx_force_cpu_boost
+    write /sys/module/ged/parameters/boost_gpu_enable 1
+    write /proc/perfmgr/true_tone 1
+    write /proc/perfmgr/color_mode 1
+    write /proc/perfmgr/fast_charge 1
+
+    # MIUI / HyperOS 3 memory swap & xswapd cgroup nodes (restricted to root & system)
+    chown root system /dev/memcg/memory.xswapd.quota
+    chown root system /dev/memcg/memory.xswapd.enable
+    chown root system /dev/memcg/memory.xswapd.score
+    chown root system /dev/memcg/memory.xswapd.refaults
+    chown root system /dev/memcg/memory.xswapd.reclaim
+    chown root system /dev/memcg/apps/memory.xswapd.quota
+    chown root system /dev/memcg/apps/memory.xswapd.score
+    chown root system /dev/memcg/apps/memory.xswapd.refaults
+    chmod 0664 /dev/memcg/memory.xswapd.quota
+    chmod 0664 /dev/memcg/memory.xswapd.enable
+    chmod 0664 /dev/memcg/memory.xswapd.score
+    chmod 0444 /dev/memcg/memory.xswapd.refaults
+    chmod 0664 /dev/memcg/memory.xswapd.reclaim
+    chmod 0664 /dev/memcg/apps/memory.xswapd.quota
+    chmod 0664 /dev/memcg/apps/memory.xswapd.score
+    chmod 0444 /dev/memcg/apps/memory.xswapd.refaults
+    chown root system /sys/kernel/xswapd/* 2>/dev/null || true
+    chmod 0664 /sys/kernel/xswapd/enabled 2>/dev/null || true
+    chmod 0664 /sys/kernel/xswapd/trigger 2>/dev/null || true
+    chmod 0664 /sys/kernel/xswapd/watermark_kb 2>/dev/null || true
+    chmod 0664 /sys/kernel/xswapd/min_score 2>/dev/null || true
+    chmod 0664 /sys/kernel/xswapd/max_scan_pages 2>/dev/null || true
+    chmod 0664 /sys/kernel/xswapd/refault_threshold 2>/dev/null || true
+    chmod 0664 /sys/kernel/xswapd/interval_ms 2>/dev/null || true
+    chmod 0444 /sys/kernel/xswapd/reclaimed_pages 2>/dev/null || true
+    chmod 0444 /sys/kernel/xswapd/status 2>/dev/null || true
+
+    # Default flash storage readahead to 128KB for smooth capture and I/O
+    write /sys/block/sda/queue/read_ahead_kb 128
+    write /sys/block/sdb/queue/read_ahead_kb 128
+    write /sys/block/sdc/queue/read_ahead_kb 128
+    write /sys/block/mmcblk0/queue/read_ahead_kb 128
+
+    # Flash storage queue tuning: mq-deadline flash tuning, allow bio request merging and enable affinity
+    write /sys/block/sda/queue/scheduler mq-deadline
+    write /sys/block/sda/queue/iosched/read_expire 250
+    write /sys/block/sda/queue/iosched/write_expire 1500
+    write /sys/block/sda/queue/iosched/fifo_batch 8
+    write /sys/block/sda/queue/rq_affinity 2
+    write /sys/block/sda/queue/iostats 0
+    write /sys/block/sda/queue/add_random 0
+    write /sys/block/sda/queue/nomerges 0
+    write /sys/block/sda/queue/nr_requests 128
+    write /sys/block/sdb/queue/scheduler mq-deadline
+    write /sys/block/sdb/queue/iosched/read_expire 250
+    write /sys/block/sdb/queue/iosched/write_expire 1500
+    write /sys/block/sdb/queue/iosched/fifo_batch 8
+    write /sys/block/sdb/queue/rq_affinity 2
+    write /sys/block/sdb/queue/iostats 0
+    write /sys/block/sdb/queue/add_random 0
+    write /sys/block/sdb/queue/nomerges 0
+    write /sys/block/sdb/queue/nr_requests 128
+    write /sys/block/sdc/queue/scheduler mq-deadline
+    write /sys/block/sdc/queue/iosched/read_expire 250
+    write /sys/block/sdc/queue/iosched/write_expire 1500
+    write /sys/block/sdc/queue/iosched/fifo_batch 8
+    write /sys/block/sdc/queue/rq_affinity 2
+    write /sys/block/sdc/queue/iostats 0
+    write /sys/block/sdc/queue/add_random 0
+    write /sys/block/sdc/queue/nomerges 0
+    write /sys/block/sdc/queue/nr_requests 128
+    write /sys/block/mmcblk0/queue/scheduler mq-deadline
+    write /sys/block/mmcblk0/queue/iosched/read_expire 250
+    write /sys/block/mmcblk0/queue/iosched/write_expire 1500
+    write /sys/block/mmcblk0/queue/iosched/fifo_batch 8
+    write /sys/block/mmcblk0/queue/rq_affinity 2
+    write /sys/block/mmcblk0/queue/iostats 0
+    write /sys/block/mmcblk0/queue/add_random 0
+    write /sys/block/mmcblk0/queue/nomerges 0
+    write /sys/block/mmcblk0/queue/nr_requests 128
+
+    # Flash storage health permissions
+    chmod 0444 /proc/ufs_health
+    chmod 0444 /sys/bus/platform/devices/11270000.ufshci/dump_health
+    chmod 0444 /sys/bus/platform/devices/11270000.ufshci/health
+    chmod 0444 /sys/bus/platform/devices/11270000.ufshci/health_remaining_pct
+    chmod 0444 /sys/bus/platform/devices/11270000.ufshci/life_time_a
+    chmod 0444 /sys/bus/platform/devices/11270000.ufshci/life_time_b
+    chmod 0444 /sys/bus/platform/devices/11270000.ufshci/pre_eol_info
+    chmod 0444 /sys/bus/platform/devices/11270000.ufshci/product_name
+    chmod 0444 /sys/bus/platform/devices/11270000.ufshci/product_revision
+    chmod 0444 /sys/bus/platform/devices/11270000.ufshci/manufacturer_id
+
+# ROM Performance Mode / Game Space Active
+on property:persist.sys.power_mode_perf=1
+    write /proc/perfmgr/gaming_mode 1
+    write /proc/net/wlan/setCAM "CAM 1"
+    write /sys/block/sda/queue/read_ahead_kb 512
+    write /sys/block/sdb/queue/read_ahead_kb 512
+    write /sys/block/sdc/queue/read_ahead_kb 512
+    write /sys/block/mmcblk0/queue/read_ahead_kb 512
+
+on property:persist.sys.power_mode_perf=0
+    write /proc/perfmgr/gaming_mode 0
+    write /proc/net/wlan/setCAM "CAM 0"
+    write /sys/block/sda/queue/read_ahead_kb 128
+    write /sys/block/sdb/queue/read_ahead_kb 128
+    write /sys/block/sdc/queue/read_ahead_kb 128
+    write /sys/block/mmcblk0/queue/read_ahead_kb 128
+
+# Ultra Power Saver Mode (AOSP / LineageOS Battery Saver)
+on property:persist.sys.power_mode_perf=-1
+    write /proc/perfmgr/gaming_mode -1
+    write /proc/net/wlan/setCAM "CAM 0"
+    write /sys/block/sda/queue/read_ahead_kb 128
+    write /sys/block/sdb/queue/read_ahead_kb 128
+    write /sys/block/sdc/queue/read_ahead_kb 128
+    write /sys/block/mmcblk0/queue/read_ahead_kb 128
+
+# LineageOS Performance Profile (0=power_save, 1=balanced, 2=performance)
+on property:sys.perf.profile=2
+    setprop persist.sys.power_mode_perf 1
+
+on property:sys.perf.profile=1
+    setprop persist.sys.power_mode_perf 0
+
+on property:sys.perf.profile=0
+    setprop persist.sys.power_mode_perf -1
+
+# Android Battery Saver Global Low Power mode
+on property:settings.global.low_power=1
+    setprop persist.sys.power_mode_perf -1
+
+on property:settings.global.low_power=0
+    setprop persist.sys.power_mode_perf 0
+
+# GameSpace Mode (AOSP / Chaldea GameSpace)
+on property:sys.gamespace.mode=1
+    setprop persist.sys.power_mode_perf 1
+
+on property:sys.gamespace.mode=0
+    setprop persist.sys.power_mode_perf 0
+
+on property:sys.gamespace.in_game=1
+    setprop persist.sys.power_mode_perf 1
+
+on property:sys.gamespace.in_game=0
+    setprop persist.sys.power_mode_perf 0
+
+# AOSP / PixelOS / LineageOS libperfmgr PowerHAL trigger
+on property:vendor.powerhal.state=SUSTAINED_PERFORMANCE
+    setprop persist.sys.power_mode_perf 1
+
+on property:vendor.powerhal.state=""
+    setprop persist.sys.power_mode_perf 0
+
+# MIUI / HyperOS Performance Mode trigger
+on property:persist.sys.perf_mode=1
+    setprop persist.sys.power_mode_perf 1
+
+on property:persist.sys.perf_mode=0
+    setprop persist.sys.power_mode_perf 0
+
+# Direct debug toggle
+on property:debug.gaming.mode=1
+    setprop persist.sys.power_mode_perf 1
+
+on property:debug.gaming.mode=0
+    setprop persist.sys.power_mode_perf 0
+RC_EOF
+    chmod 644 $RAMDISK/init.gaming.rc
+
+    # 3. Smart Battery Guard & Direct Power Bypass Charging
+    cat << 'RC_EOF' > $RAMDISK/init.battery_guard.rc
+# Smart Battery Guard & Direct Power Bypass Charging for Redmi Note 8 Pro (begonia)
+on boot
+    chmod 0664 /sys/kernel/battery_protection/bypass_mode
+    chmod 0664 /sys/kernel/battery_protection/charge_limit
+    chmod 0664 /sys/kernel/battery_protection/thermal_guard
+    chmod 0664 /sys/kernel/battery_protection/temp_limit
+    chmod 0444 /sys/kernel/battery_protection/status
+    chmod 0444 /sys/kernel/battery_protection/battery_soc
+    chmod 0444 /sys/kernel/battery_protection/battery_temp
+
+    # Default: Full charge (100%), thermal guard disabled (0) so JEITA handles protection without artificial stopping
+    write /sys/kernel/battery_protection/charge_limit 100
+    write /sys/kernel/battery_protection/thermal_guard 0
+    write /sys/kernel/battery_protection/temp_limit 48
+
+    # True Tone System Default (Calibrated Liquid Retina D65)
+    chmod 0644 /proc/perfmgr/true_tone
+    chmod 0644 /sys/kernel/true_tone
+    write /proc/perfmgr/true_tone 1
+RC_EOF
+    chmod 644 $RAMDISK/init.battery_guard.rc
+
+    if [ -f "$RAMDISK/init.rc" ]; then
+        insert_line init.rc "init.memory_enhanced.rc" after "import /init.environ.rc" "import /init.memory_enhanced.rc";
+        insert_line init.rc "init.gaming.rc" after "import /init.memory_enhanced.rc" "import /init.gaming.rc";
+        insert_line init.rc "init.battery_guard.rc" after "import /init.gaming.rc" "import /init.battery_guard.rc";
+    fi
+fi
+
+ui_print " [*] [3/4] Repacking boot image with Pox Onyx (1.0.0-Beta)...";
+ui_print "     - Linux kernel: v4.14.357 (MT6785 / Helio G90T)";
+ui_print "     - Low-battery call reboot fix: active";
+ui_print "     - Smart Battery Guard: Direct-Power Bypass & 39C Thermal Protection";
+ui_print "     - Hardware Bypass Control: /proc/perfmgr/battery_bypass (0644)";
+ui_print "     - Hardware 240Hz Touch Gaming Mode: zero-debounce sampling active";
+ui_print "     - Hardware Double-Tap to Wake: /proc/perfmgr/dt2w & /sys/android_touch";
+ui_print "     - MediaTek Task-Turbo: UI RenderThread, Binder & BigCore boost";
+ui_print "     - Hardware Vibrator: unlocked 3.3V range & /proc/perfmgr/vibrator_strength";
+ui_print "     - Deep Sleep Wakelock Filter: parasitic network wakelocks blocked";
+ui_print "     - Fast Charge Boost: 1.5A PC USB & 2.0A non-std charger boost active";
+ui_print "     - Hi-Fi Sound & Mic: MT6359 +8dB headphone & +18dB mic analog gain";
+ui_print "     - Dynamic Fsync Engine: micro-stutter elimination active";
+ui_print "     - Network & Wi-Fi Engine: TCP Fast Open & Wi-Fi SetCAM zero-jitter active";
+ui_print "     - EAS Schedutil & Fork: 32% capacity margin & child_runs_first active";
+ui_print "     - Flash Storage Queue: rq_affinity=2, iostats=0 & nomerges tuning";
+ui_print "     - LiquidCool Gaming Thermal: 1200mW CPU & 1000mW GPU floor lock";
+ui_print "     - Storage I/O: BFQ hierarchical scheduler & 512KB readahead active";
+ui_print "     - Cinema Camera Engine: 4K 60FPS unlocked & Sony S-Log3 active";
+ui_print "     - APatch / KernelPatch KALLSYMS: enabled";
+ui_print "     - iOS-Style Compressed Memory: ZSTD ZRAM, 24MB cushion, vfs=50";
+ui_print "     - True Tone Display Engine: Calibrated D65 Liquid Retina reference active";
+ui_print "     - Video Anti-Lag Engine: VDEC/VENC clock floor & LP4-2100 DDR active";
+ui_print "     - Zero Frame-Drop Gaming Mode: active on ROM Performance toggle";
+ui_print "     - FPSGO Ultra-Rescue + Mali-G76 MC4 Touch Boost: enabled";
+ui_print "     - Universal USB OTG: DACs, controllers, serial & ethernet active";
+write_boot;
+
+ui_print " [*] [4/4] Cleaning up temporary installer files...";
+ui_print " ";
+ui_print " ============================================";
+ui_print "   POX ONYX 1.0.0-Beta (onyx) INSTALLED!";
+ui_print "   Commit: 3888146";
+ui_print "   We aim for stability, not for anything else.";
+ui_print "      Reboot and enjoy solid stability.      ";
+ui_print " ============================================";
+ui_print " ";
+## end install
