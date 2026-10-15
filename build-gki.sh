@@ -132,12 +132,23 @@ done
 # Self-diagnosis: gen_btf() never checks pahole's exit status, so a pahole
 # failure yields an empty .BTF and only surfaces much later as
 # "FAILED: load BTF from vmlinux: Invalid argument". Check it here instead.
+# Self-diagnosis: gen_btf() never checks pahole's exit status, so a pahole
+# failure yields an empty .BTF and only surfaces much later as
+# "FAILED: load BTF from vmlinux: Invalid argument". Check it here instead.
+#
+# Section sizes are parsed with shell hex arithmetic rather than awk's
+# strtonum(), which mawk (the default on Debian/Ubuntu) does not implement --
+# it silently returns empty there and used to report a valid .BTF as 0 bytes.
 if grep -q '^CONFIG_DEBUG_INFO_BTF=y' "$kdir/.config" 2>/dev/null && [ -f "$kdir/vmlinux" ]; then
-  bsz=$(readelf -S "$kdir/vmlinux" 2>/dev/null | awk '$2==".BTF" {print strtonum("0x"$6)}' | head -1)
-  if [ -n "$bsz" ] && [ "$bsz" -ge 24 ]; then
+  # readelf -SW splits the section index into two tokens ("[" then "4]"), so the
+# section name is $3 and the size is $7. Not strtonum(): mawk lacks it.
+  bsz=$(readelf -SW "$kdir/vmlinux" 2>/dev/null |
+        awk '$3 == ".BTF" { print $7; exit }')
+  bsz=$((16#${bsz:-0}))
+  if [ "$bsz" -ge 24 ]; then
     ok ".BTF section: $bsz bytes"
   else
-    die "vmlinux .BTF is empty/absent (${bsz:-0} bytes) - pahole did not emit BTF.
+    die "vmlinux .BTF is empty/absent ($bsz bytes) - pahole did not emit BTF.
   gen_btf() in scripts/link-vmlinux.sh ignores pahole's exit status.
   Check: pahole version vs CONFIG_PAHOLE_VERSION, and DEBUG_INFO_DWARF4 vs DWARF5."
   fi
