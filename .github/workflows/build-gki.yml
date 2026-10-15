@@ -77,7 +77,7 @@ jobs:
             ccache-gki-${{ env.GKI_BRANCH }}-
 
       - name: Build GKI kernel
-        run: ./build-gki.sh -j "$(nproc)" --targets Image --out out-gki
+        run: TREE=gki-src ./build-gki.sh -j "$(nproc)" --targets Image --out out-gki
 
       - name: Report ccache hit rate
         if: always()
